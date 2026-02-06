@@ -25,6 +25,7 @@ import scala.reflect.{classTag, ClassTag}
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.JavaTypeInferenceBeans.{Bar, Foo, JavaBeanWithGenericBase, JavaBeanWithGenericHierarchy, JavaBeanWithGenericsABC, StringBarWrapper, StringFooWrapper}
+import org.apache.spark.sql.catalyst.JavaTypeInferenceRecords._
 import org.apache.spark.sql.catalyst.encoders.{AgnosticEncoder, UDTCaseClass, UDTForCaseClass}
 import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders._
 import org.apache.spark.sql.types.{DecimalType, MapType, Metadata, StringType, StructField, StructType}
@@ -298,6 +299,137 @@ class JavaTypeInferenceSuite extends SparkFunSuite {
         ClassTag(classOf[Bar[String]]),
         Seq(encoderField("t", StringEncoder))
       ))
+    ))
+    assert(encoder === expected)
+  }
+
+  // Java Record tests
+  test("resolve simple Java record") {
+    val encoder = JavaTypeInference.encoderFor(classOf[SimpleRecord])
+    val expected = JavaRecordEncoder(ClassTag(classOf[SimpleRecord]), Seq(
+      EncoderField("name", StringEncoder, nullable = true, Metadata.empty,
+        Option("name"), None),
+      EncoderField("age", PrimitiveIntEncoder, nullable = false, Metadata.empty,
+        Option("age"), None)
+    ))
+    assert(encoder === expected)
+  }
+
+  test("resolve Java record with BigInteger") {
+    val encoder = JavaTypeInference.encoderFor(classOf[RecordWithBigInteger])
+    val expected = JavaRecordEncoder(ClassTag(classOf[RecordWithBigInteger]), Seq(
+      EncoderField("value", JavaBigIntEncoder, nullable = true, Metadata.empty,
+        Option("value"), None)
+    ))
+    assert(encoder === expected)
+  }
+
+  test("resolve Java record with leaf types") {
+    val encoder = JavaTypeInference.encoderFor(classOf[LeafRecord])
+    val expected = JavaRecordEncoder(ClassTag(classOf[LeafRecord]), Seq(
+      EncoderField("primitiveBoolean", PrimitiveBooleanEncoder, nullable = false,
+        Metadata.empty, Option("primitiveBoolean"), None),
+      EncoderField("primitiveByte", PrimitiveByteEncoder, nullable = false,
+        Metadata.empty, Option("primitiveByte"), None),
+      EncoderField("primitiveShort", PrimitiveShortEncoder, nullable = false,
+        Metadata.empty, Option("primitiveShort"), None),
+      EncoderField("primitiveInt", PrimitiveIntEncoder, nullable = false,
+        Metadata.empty, Option("primitiveInt"), None),
+      EncoderField("primitiveLong", PrimitiveLongEncoder, nullable = false,
+        Metadata.empty, Option("primitiveLong"), None),
+      EncoderField("primitiveFloat", PrimitiveFloatEncoder, nullable = false,
+        Metadata.empty, Option("primitiveFloat"), None),
+      EncoderField("primitiveDouble", PrimitiveDoubleEncoder, nullable = false,
+        Metadata.empty, Option("primitiveDouble"), None),
+      EncoderField("boxedBoolean", BoxedBooleanEncoder, nullable = true,
+        Metadata.empty, Option("boxedBoolean"), None),
+      EncoderField("boxedByte", BoxedByteEncoder, nullable = true,
+        Metadata.empty, Option("boxedByte"), None),
+      EncoderField("boxedShort", BoxedShortEncoder, nullable = true,
+        Metadata.empty, Option("boxedShort"), None),
+      EncoderField("boxedInt", BoxedIntEncoder, nullable = true,
+        Metadata.empty, Option("boxedInt"), None),
+      EncoderField("boxedLong", BoxedLongEncoder, nullable = true,
+        Metadata.empty, Option("boxedLong"), None),
+      EncoderField("boxedFloat", BoxedFloatEncoder, nullable = true,
+        Metadata.empty, Option("boxedFloat"), None),
+      EncoderField("boxedDouble", BoxedDoubleEncoder, nullable = true,
+        Metadata.empty, Option("boxedDouble"), None),
+      EncoderField("string", StringEncoder, nullable = true,
+        Metadata.empty, Option("string"), None),
+      EncoderField("binary", BinaryEncoder, nullable = true,
+        Metadata.empty, Option("binary"), None),
+      EncoderField("bigDecimal", DEFAULT_JAVA_DECIMAL_ENCODER, nullable = true,
+        Metadata.empty, Option("bigDecimal"), None),
+      EncoderField("bigInteger", JavaBigIntEncoder, nullable = true,
+        Metadata.empty, Option("bigInteger"), None),
+      EncoderField("localDate", STRICT_LOCAL_DATE_ENCODER, nullable = true,
+        Metadata.empty, Option("localDate"), None),
+      EncoderField("date", STRICT_DATE_ENCODER, nullable = true,
+        Metadata.empty, Option("date"), None),
+      EncoderField("instant", STRICT_INSTANT_ENCODER, nullable = true,
+        Metadata.empty, Option("instant"), None),
+      EncoderField("timestamp", STRICT_TIMESTAMP_ENCODER, nullable = true,
+        Metadata.empty, Option("timestamp"), None),
+      EncoderField("localDateTime", LocalDateTimeEncoder, nullable = true,
+        Metadata.empty, Option("localDateTime"), None),
+      EncoderField("duration", DayTimeIntervalEncoder, nullable = true,
+        Metadata.empty, Option("duration"), None),
+      EncoderField("period", YearMonthIntervalEncoder, nullable = true,
+        Metadata.empty, Option("period"), None),
+      EncoderField("monthEnum", JavaEnumEncoder(classTag[java.time.Month]), nullable = true,
+        Metadata.empty, Option("monthEnum"), None)
+    ))
+    assert(encoder === expected)
+  }
+
+  test("resolve nested Java record") {
+    val encoder = JavaTypeInference.encoderFor(classOf[NestedRecord])
+    val innerEncoder = JavaRecordEncoder(ClassTag(classOf[SimpleRecord]), Seq(
+      EncoderField("name", StringEncoder, nullable = true, Metadata.empty,
+        Option("name"), None),
+      EncoderField("age", PrimitiveIntEncoder, nullable = false, Metadata.empty,
+        Option("age"), None)
+    ))
+    val expected = JavaRecordEncoder(ClassTag(classOf[NestedRecord]), Seq(
+      EncoderField("id", StringEncoder, nullable = true, Metadata.empty,
+        Option("id"), None),
+      EncoderField("inner", innerEncoder, nullable = true, Metadata.empty,
+        Option("inner"), None)
+    ))
+    assert(encoder === expected)
+  }
+
+  test("resolve Java record with arrays") {
+    val encoder = JavaTypeInference.encoderFor(classOf[ArrayRecord])
+    val simpleRecordEncoder: AgnosticEncoder[_] =
+      JavaRecordEncoder(ClassTag(classOf[SimpleRecord]), Seq(
+        EncoderField("name", StringEncoder, nullable = true, Metadata.empty,
+          Option("name"), None),
+        EncoderField("age", PrimitiveIntEncoder, nullable = false, Metadata.empty,
+          Option("age"), None)
+      ))
+    val expected = JavaRecordEncoder(ClassTag(classOf[ArrayRecord]), Seq(
+      EncoderField("primitiveIntArray",
+        ArrayEncoder(PrimitiveIntEncoder, containsNull = false), nullable = true,
+        Metadata.empty, Option("primitiveIntArray"), None),
+      EncoderField("stringArray",
+        ArrayEncoder(StringEncoder, containsNull = true), nullable = true,
+        Metadata.empty, Option("stringArray"), None),
+      EncoderField("recordArray",
+        ArrayEncoder(simpleRecordEncoder, containsNull = true), nullable = true,
+        Metadata.empty, Option("recordArray"), None)
+    ))
+    assert(encoder === expected)
+  }
+
+  test("resolve Java record with @Nonnull annotation") {
+    val encoder = JavaTypeInference.encoderFor(classOf[NonNullRecord])
+    val expected = JavaRecordEncoder(ClassTag(classOf[NonNullRecord]), Seq(
+      EncoderField("name", StringEncoder, nullable = false, Metadata.empty,
+        Option("name"), None),
+      EncoderField("age", BoxedIntEncoder, nullable = true, Metadata.empty,
+        Option("age"), None)
     ))
     assert(encoder === expected)
   }

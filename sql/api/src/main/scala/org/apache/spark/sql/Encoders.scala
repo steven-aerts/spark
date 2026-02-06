@@ -205,6 +205,7 @@ object Encoders {
    *   - time related: java.sql.Date, java.sql.Timestamp, java.time.LocalDate, java.time.Instant
    *   - collection types: array, java.util.List, and map
    *   - nested java bean.
+   *   - java record classes
    *
    * @since 1.6.0
    */

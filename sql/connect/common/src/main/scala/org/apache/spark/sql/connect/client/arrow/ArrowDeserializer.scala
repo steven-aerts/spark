@@ -398,6 +398,25 @@ object ArrowDeserializers {
           }
         }
 
+      case (JavaRecordEncoder(tag, fields), StructVectors(struct, vectors)) =>
+        // For records, use the canonical constructor with all field arguments
+        val lookup = createFieldLookup(vectors)
+        val fieldDeserializers = fields.map { field =>
+          val vector = lookup(field.name)
+          deserializerFor(field.enc, vector, timeZoneId)
+        }
+        val paramTypes = fields.map(_.enc.clsTag.runtimeClass).toArray
+        val constructor =
+          methodLookup.findConstructor(
+            tag.runtimeClass,
+            MethodType.methodType(classOf[Unit], paramTypes))
+        new StructFieldSerializer[Any](struct) {
+          def value(i: Int): Any = {
+            val args = fieldDeserializers.map(_.get(i)).toArray
+            constructor.invoke(args)
+          }
+        }
+
       case (TransformingEncoder(_, encoder, provider, _), v) =>
         new Deserializer[Any] {
           private[this] val codec = provider()

@@ -27,7 +27,7 @@ import scala.reflect.ClassTag
 import org.apache.commons.lang3.reflect.{TypeUtils => JavaTypeUtils}
 
 import org.apache.spark.sql.catalyst.encoders.AgnosticEncoder
-import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders.{ArrayEncoder, BinaryEncoder, BoxedBooleanEncoder, BoxedByteEncoder, BoxedDoubleEncoder, BoxedFloatEncoder, BoxedIntEncoder, BoxedLongEncoder, BoxedShortEncoder, DayTimeIntervalEncoder, DEFAULT_GEOGRAPHY_ENCODER, DEFAULT_GEOMETRY_ENCODER, DEFAULT_JAVA_DECIMAL_ENCODER, EncoderField, IterableEncoder, JavaBeanEncoder, JavaBigIntEncoder, JavaEnumEncoder, LocalDateTimeEncoder, LocalTimeEncoder, MapEncoder, PrimitiveBooleanEncoder, PrimitiveByteEncoder, PrimitiveDoubleEncoder, PrimitiveFloatEncoder, PrimitiveIntEncoder, PrimitiveLongEncoder, PrimitiveShortEncoder, STRICT_DATE_ENCODER, STRICT_INSTANT_ENCODER, STRICT_LOCAL_DATE_ENCODER, STRICT_TIMESTAMP_ENCODER, StringEncoder, UDTEncoder, YearMonthIntervalEncoder}
+import org.apache.spark.sql.catalyst.encoders.AgnosticEncoders.{ArrayEncoder, BinaryEncoder, BoxedBooleanEncoder, BoxedByteEncoder, BoxedDoubleEncoder, BoxedFloatEncoder, BoxedIntEncoder, BoxedLongEncoder, BoxedShortEncoder, DayTimeIntervalEncoder, DEFAULT_GEOGRAPHY_ENCODER, DEFAULT_GEOMETRY_ENCODER, DEFAULT_JAVA_DECIMAL_ENCODER, EncoderField, IterableEncoder, JavaBeanEncoder, JavaBigIntEncoder, JavaEnumEncoder, JavaRecordEncoder, LocalDateTimeEncoder, LocalTimeEncoder, MapEncoder, PrimitiveBooleanEncoder, PrimitiveByteEncoder, PrimitiveDoubleEncoder, PrimitiveFloatEncoder, PrimitiveIntEncoder, PrimitiveLongEncoder, PrimitiveShortEncoder, STRICT_DATE_ENCODER, STRICT_INSTANT_ENCODER, STRICT_LOCAL_DATE_ENCODER, STRICT_TIMESTAMP_ENCODER, StringEncoder, UDTEncoder, YearMonthIntervalEncoder}
 import org.apache.spark.sql.errors.ExecutionErrors
 import org.apache.spark.sql.types._
 import org.apache.spark.util.ArrayImplicits._
@@ -152,27 +152,51 @@ object JavaTypeInference {
         throw ExecutionErrors.cannotHaveCircularReferencesInBeanClassError(c)
       }
 
-      // TODO: we should only collect properties that have getter and setter. However, some tests
-      //   pass in scala case class as java bean class which doesn't have getter and setter.
-      val properties = getJavaBeanReadableProperties(c)
-      // add type variables from inheritance hierarchy of the class
-      val classTV = JavaTypeUtils.getTypeArguments(c, classOf[Object]).asScala.toMap ++
-        typeVariables
-      // Note that the fields are ordered by name.
-      val fields = properties.map { property =>
-        val readMethod = property.getReadMethod
-        val encoder = encoderFor(readMethod.getGenericReturnType, seenTypeSet + c, classTV)
-        // The existence of `javax.annotation.Nonnull`, means this field is not nullable.
-        val hasNonNull = readMethod.isAnnotationPresent(classOf[Nonnull])
-        EncoderField(
-          property.getName,
-          encoder,
-          encoder.nullable && !hasNonNull,
-          Metadata.empty,
-          Option(readMethod.getName),
-          Option(property.getWriteMethod).map(_.getName))
+      // Check if this is a Java record (Java 16+)
+      if (c.isRecord) {
+        val recordComponents = c.getRecordComponents
+        // add type variables from inheritance hierarchy of the class
+        val classTV = JavaTypeUtils.getTypeArguments(c, classOf[Object]).asScala.toMap ++
+          typeVariables
+        // Note that the fields are ordered by the record component order.
+        val fields = recordComponents.map { component =>
+          val accessor = component.getAccessor
+          val encoder = encoderFor(component.getGenericType, seenTypeSet + c, classTV)
+          // The existence of `javax.annotation.Nonnull`, means this field is not nullable.
+          val hasNonNull = accessor.isAnnotationPresent(classOf[Nonnull])
+          EncoderField(
+            component.getName,
+            encoder,
+            encoder.nullable && !hasNonNull,
+            Metadata.empty,
+            Option(accessor.getName),
+            None
+          ) // Records don't have setters
+        }
+        JavaRecordEncoder(ClassTag(c), fields.toImmutableArraySeq)
+      } else {
+        // TODO: we should only collect properties that have getter and setter. However, some tests
+        //   pass in scala case class as java bean class which doesn't have getter and setter.
+        val properties = getJavaBeanReadableProperties(c)
+        // add type variables from inheritance hierarchy of the class
+        val classTV = JavaTypeUtils.getTypeArguments(c, classOf[Object]).asScala.toMap ++
+          typeVariables
+        // Note that the fields are ordered by name.
+        val fields = properties.map { property =>
+          val readMethod = property.getReadMethod
+          val encoder = encoderFor(readMethod.getGenericReturnType, seenTypeSet + c, classTV)
+          // The existence of `javax.annotation.Nonnull`, means this field is not nullable.
+          val hasNonNull = readMethod.isAnnotationPresent(classOf[Nonnull])
+          EncoderField(
+            property.getName,
+            encoder,
+            encoder.nullable && !hasNonNull,
+            Metadata.empty,
+            Option(readMethod.getName),
+            Option(property.getWriteMethod).map(_.getName))
+        }
+        JavaBeanEncoder(ClassTag(c), fields.toImmutableArraySeq)
       }
-      JavaBeanEncoder(ClassTag(c), fields.toImmutableArraySeq)
 
     case _ =>
       throw ExecutionErrors.cannotFindEncoderForTypeError(t.toString)

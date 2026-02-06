@@ -500,6 +500,12 @@ object ArrowSerializer {
           o => getter.invoke(o)
         }
 
+      case (JavaRecordEncoder(tag, fields), StructVectors(struct, vectors)) =>
+        structSerializerFor(fields, struct, vectors) { (field, _) =>
+          val getter = methodLookup.unreflect(tag.runtimeClass.getMethod(field.readMethod.get))
+          o => getter.invoke(o)
+        }
+
       case (TransformingEncoder(_, encoder, provider, _), v) =>
         new Serializer {
           private[this] val codec = provider().asInstanceOf[Codec[Any, Any]]
